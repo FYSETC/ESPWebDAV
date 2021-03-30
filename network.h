@@ -1,7 +1,6 @@
 #ifndef _NETWORK_H_
 #define _NETWORK_H_
 
-#define HOSTNAME		"FYSETC"
 #define SERVER_PORT		80
 
 #define WIFI_CONNECT_TIMEOUT 30000UL

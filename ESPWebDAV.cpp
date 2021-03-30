@@ -108,7 +108,7 @@ void ESPWebDAV::handleRequest(String blank)	{
 	DBG_PRINT(" u: "); DBG_PRINTLN(uri);
 
 	// add header that gets sent everytime
-	sendHeader("DAV", "2");
+	sendHeader("DAV", "1, 2");
 
 	// handle properties
 	if(method.equals("PROPFIND"))

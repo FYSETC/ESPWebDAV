@@ -66,11 +66,23 @@ int Config::loadSD() {
         goto FAIL;
       }
     }
+    else if(sKEY == "HOSTNAME") {
+      SERIAL_ECHOLN("INI file : HOSTNAME found");
+      if(sValue.length()>0) {
+        memset(data._hostname,'\0',HOSTNAME_LEN);
+        sValue.toCharArray(data._hostname,HOSTNAME_LEN);
+        step++;
+      }
+      else {
+        rst = -7;
+        goto FAIL;
+      }
+    }
     else continue; // Bad line
   }
-  if(step != 2) { // We miss ssid or password
+  if(step != 3) { // We miss ssid or password
     //memset(data,) // TODO: do we need to empty the data?
-    SERIAL_ECHOLN("Please check your SSDI or PASSWORD in ini file");
+    SERIAL_ECHOLN("Please check your SSID, PASSWORD, and HOSTNAME in ini file");
     rst = -6;
     goto FAIL;
   }
@@ -123,14 +135,24 @@ void Config::password(char* password) {
   strncpy(data.psw,password,WIFI_PASSWD_LEN);
 }
 
-void Config::save(const char*ssid,const char*password) {
-  if(ssid ==NULL || password==NULL)
+char* Config::hostname() {
+  return data._hostname;
+}
+
+void Config::hostname(char* hostname) {
+  if (hostname==NULL) return;
+  strncpy(data._hostname, hostname, HOSTNAME_LEN);
+}
+
+void Config::save(const char*ssid,const char*password, const char* hostname) {
+  if(ssid ==NULL || password==NULL || hostname==NULL)
     return;
 
   EEPROM.begin(EEPROM_SIZE);
   data.flag = 1;
   strncpy(data.ssid, ssid, WIFI_SSID_LEN);
   strncpy(data.psw, password, WIFI_PASSWD_LEN);
+  strncpy(data._hostname, hostname, HOSTNAME_LEN);
   uint8_t *p = (uint8_t*)(&data);
   for (int i = 0; i < sizeof(data); i++)
   {
@@ -140,7 +162,7 @@ void Config::save(const char*ssid,const char*password) {
 }
 
 void Config::save() {
-  if(data.ssid == NULL || data.psw == NULL)
+  if(data.ssid == NULL || data.psw == NULL || data._hostname==NULL)
     return;
 
   EEPROM.begin(EEPROM_SIZE);
