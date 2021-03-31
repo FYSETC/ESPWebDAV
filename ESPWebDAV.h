@@ -14,6 +14,7 @@
 // constants for WebServer
 #define CONTENT_LENGTH_UNKNOWN ((size_t) -1)
 #define CONTENT_LENGTH_NOT_SET ((size_t) -2)
+#define CONTENT_RANGE_NOT_SET ((size_t) -1)
 #define HTTP_MAX_POST_WAIT 		5000 
 
 enum ResourceType { RESOURCE_NONE, RESOURCE_FILE, RESOURCE_DIR };
@@ -43,7 +44,7 @@ protected:
 	void handleProp(ResourceType resource);
 	void sendPropResponse(boolean recursing, FatFile *curFile);
 	void handleGet(ResourceType resource, bool isGet);
-	void handlePut(ResourceType resource);
+  void handlePut(ResourceType resource);
 	void handleWriteError(String message, FatFile *wFile);
 	void handleDirectoryCreate(ResourceType resource);
 	void handleMove(ResourceType resource);
@@ -72,13 +73,14 @@ protected:
 	String 		method;
 	String 		uri;
 	String 		contentLengthHeader;
+  String    contentRangeHeader;
 	String 		depthHeader;
 	String 		hostHeader;
 	String		destinationHeader;
 
 	String 		_responseHeaders;
 	bool		_chunked;
-	int			_contentLength;
+	int			_contentLength, _contentRangeStart, _contentRangeEnd;
 };
 
 extern ESPWebDAV dav;

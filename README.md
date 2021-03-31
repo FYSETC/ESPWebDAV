@@ -16,7 +16,7 @@ GCode can be directly uploaded from the slicer (Cura) to this remote drive, ther
 
 ## Dependencies:
 1. [ESP8266 Arduino Core version 2.4](https://github.com/esp8266/Arduino)
-2. [SdFat library](https://github.com/greiman/SdFat)
+2. [SdFat library version 1.0.16](https://github.com/greiman/SdFat)
 
 
 ## Use:

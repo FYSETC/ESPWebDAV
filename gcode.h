@@ -21,6 +21,7 @@ private:
   void gcode_M51();
   void gcode_M52();
   void gcode_M53();
+  void gcode_M54();
   void process_parsed_command();
   void process_next_command();
   

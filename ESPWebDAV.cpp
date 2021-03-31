@@ -108,7 +108,12 @@ void ESPWebDAV::handleRequest(String blank)	{
 	DBG_PRINT(" u: "); DBG_PRINTLN(uri);
 
 	// add header that gets sent everytime
-	sendHeader("DAV", "2");
+	sendHeader("DAV", "1, 2");
+
+  // these headers are for webdavfs (https://github.com/miquels/webdavfs)
+  // pretend to be enough like Apache that we get read/write support
+  sendHeader("Server", "ESPWebDAV (use Apache put range)");
+  sendHeader("DAV", "<http://apache.org/dav/propset/fs/1>");
 
 	// handle properties
 	if(method.equals("PROPFIND"))
@@ -349,31 +354,61 @@ void ESPWebDAV::handleGet(ResourceType resource, bool isGet)	{
 	rFile.open(uri.c_str(), O_READ);
 
 	sendHeader("Allow", "PROPFIND,OPTIONS,DELETE,COPY,MOVE,HEAD,POST,PUT,GET");
-	size_t fileSize = rFile.fileSize();
-	setContentLength(fileSize);
+ 	size_t fileSize;
+ 	if (_contentRangeStart==CONTENT_RANGE_NOT_SET && _contentRangeEnd==CONTENT_RANGE_NOT_SET)
+ 	{
+ 	  fileSize=rFile.fileSize();
+ 	}
+ 	else
+ 	{
+ 	  fileSize=_contentRangeEnd-_contentRangeStart+1;
+    sendHeader("Accept-Ranges", "bytes");
+    sendHeader("Content-Range", "bytes "+String(_contentRangeStart)+"-"+String(_contentRangeEnd)+"/"+String(rFile.fileSize()));
+ 	}
+  setContentLength(fileSize);
+  
 	String contentType = getMimeType(uri);
 	if(uri.endsWith(".gz") && contentType != "application/x-gzip" && contentType != "application/octet-stream")
 		sendHeader("Content-Encoding", "gzip");
 
-	send("200 OK", contentType.c_str(), "");
+  if (!isGet)
+  	send("200 OK", contentType.c_str(), "");
 
-	if(isGet)	{
+	if(isGet)	
+	{
+
 		// disable Nagle if buffer size > TCP MTU of 1460
 		// client.setNoDelay(1);
 
-		// send the file
-		while(rFile.available())	{
-			// SD read speed ~ 17sec for 4.5MB file
-			int numRead = rFile.read(buf, sizeof(buf));
-			client.write(buf, numRead);
-		}
+    if (_contentRangeStart==CONTENT_RANGE_NOT_SET && _contentRangeEnd==CONTENT_RANGE_NOT_SET)
+    {
+      send("200 OK", contentType.c_str(), "");
+  		// send the whole file
+  		while(rFile.available())	
+  		{
+  			// SD read speed ~ 17sec for 4.5MB file
+  			int numRead = rFile.read(buf, sizeof(buf));
+  			client.write(buf, numRead);
+  		}
+    }
+    else
+    {
+      send("206 Partial Content", contentType.c_str(), "");
+      // send the selected range
+      rFile.seekSet(_contentRangeStart);
+      size_t remaining=fileSize;
+      while (remaining>0)
+      {
+        int numRead=rFile.read(buf, (sizeof(buf)<remaining)?sizeof(buf):remaining);
+        client.write(buf, numRead);
+        remaining-=numRead;
+      }
+    }
 	}
 
 	rFile.close();
 	DBG_PRINT("File "); DBG_PRINT(fileSize); DBG_PRINT(" bytes sent in: "); DBG_PRINT((millis() - tStart)/1000); DBG_PRINTLN(" sec");
 }
-
-
 
 
 // ------------------------
@@ -399,59 +434,98 @@ void ESPWebDAV::handlePut(ResourceType resource)	{
 	// did server send any data in put
 	size_t contentLen = contentLengthHeader.toInt();
 
-	if(contentLen != 0)	{
-		// buffer size is critical *don't change*
+	if (_contentRangeStart==CONTENT_RANGE_NOT_SET && _contentRangeEnd==CONTENT_RANGE_NOT_SET)
+	{
+		if(contentLen != 0)	{
+			// buffer size is critical *don't change*
+			const size_t WRITE_BLOCK_CONST = 512;
+			uint8_t buf[WRITE_BLOCK_CONST];
+			long tStart = millis();
+			size_t numRemaining = contentLen;
+
+			// high speed raw write implementation
+			// close any previous file
+			nFile.close();
+			// delete old file
+			sd.remove(uri.c_str());
+		
+			// create a contiguous file
+			size_t contBlocks = (contentLen/WRITE_BLOCK_CONST + 1);
+			uint32_t bgnBlock, endBlock;
+
+			if (!nFile.createContiguous(sd.vwd(), uri.c_str(), contBlocks * WRITE_BLOCK_CONST))
+				return handleWriteError("File create contiguous sections failed", &nFile);
+
+			// get the location of the file's blocks
+			if (!nFile.contiguousRange(&bgnBlock, &endBlock))
+				return handleWriteError("Unable to get contiguous range", &nFile);
+
+			if (!sd.card()->writeStart(bgnBlock, contBlocks))
+				return handleWriteError("Unable to start writing contiguous range", &nFile);
+
+			// read data from stream and write to the file
+			while(numRemaining > 0)	{
+				size_t numToRead = (numRemaining > WRITE_BLOCK_CONST) ? WRITE_BLOCK_CONST : numRemaining;
+				size_t numRead = readBytesWithTimeout(buf, sizeof(buf), numToRead);
+				if(numRead == 0)
+					break;
+
+				// store whole buffer into file regardless of numRead
+				if (!sd.card()->writeData(buf))
+					return handleWriteError("Write data failed", &nFile);
+
+				// reduce the number outstanding
+				numRemaining -= numRead;
+			}
+
+			// stop writing operation
+			if (!sd.card()->writeStop())
+				return handleWriteError("Unable to stop writing contiguous range", &nFile);
+
+			// detect timeout condition
+			if(numRemaining)
+				return handleWriteError("Timed out waiting for data", &nFile);
+
+			// truncate the file to right length
+			if(!nFile.truncate(contentLen))
+				return handleWriteError("Unable to truncate the file", &nFile);
+
+			DBG_PRINT("File "); DBG_PRINT(contentLen - numRemaining); DBG_PRINT(" bytes stored in: "); DBG_PRINT((millis() - tStart)/1000); DBG_PRINTLN(" sec");
+		}
+	}
+	else
+	{
+    // reopen file so we can seek within it
+    nFile.close();
+    nFile.open(uri.c_str(), O_RDWR);
+
+		// set up buffer
 		const size_t WRITE_BLOCK_CONST = 512;
 		uint8_t buf[WRITE_BLOCK_CONST];
 		long tStart = millis();
 		size_t numRemaining = contentLen;
 
-		// high speed raw write implementation
-		// close any previous file
-		nFile.close();
-		// delete old file
-		sd.remove(uri.c_str());
-	
-		// create a contiguous file
-		size_t contBlocks = (contentLen/WRITE_BLOCK_CONST + 1);
-		uint32_t bgnBlock, endBlock;
+		// seek to beginning of range
+    nFile.seekSet(_contentRangeStart);
 
-		if (!nFile.createContiguous(sd.vwd(), uri.c_str(), contBlocks * WRITE_BLOCK_CONST))
-			return handleWriteError("File create contiguous sections failed", &nFile);
-
-		// get the location of the file's blocks
-		if (!nFile.contiguousRange(&bgnBlock, &endBlock))
-			return handleWriteError("Unable to get contiguous range", &nFile);
-
-		if (!sd.card()->writeStart(bgnBlock, contBlocks))
-			return handleWriteError("Unable to start writing contiguous range", &nFile);
-
-		// read data from stream and write to the file
-		while(numRemaining > 0)	{
+		// update file
+		while (numRemaining>0)
+		{
 			size_t numToRead = (numRemaining > WRITE_BLOCK_CONST) ? WRITE_BLOCK_CONST : numRemaining;
 			size_t numRead = readBytesWithTimeout(buf, sizeof(buf), numToRead);
 			if(numRead == 0)
 				break;
-
-			// store whole buffer into file regardless of numRead
-			if (!sd.card()->writeData(buf))
-				return handleWriteError("Write data failed", &nFile);
-
-			// reduce the number outstanding
-			numRemaining -= numRead;
+			nFile.write(buf, numRead);
+			numRemaining-=numRead;
 		}
 
-		// stop writing operation
-		if (!sd.card()->writeStop())
-			return handleWriteError("Unable to stop writing contiguous range", &nFile);
+		// close
+		if (!nFile.close())
+			return handleWriteError("Unable to close file after write", &nFile);
 
-		// detect timeout condition
-		if(numRemaining)
+		// timed out?
+		if (numRemaining)
 			return handleWriteError("Timed out waiting for data", &nFile);
-
-		// truncate the file to right length
-		if(!nFile.truncate(contentLen))
-			return handleWriteError("Unable to truncate the file", &nFile);
 
 		DBG_PRINT("File "); DBG_PRINT(contentLen - numRemaining); DBG_PRINT(" bytes stored in: "); DBG_PRINT((millis() - tStart)/1000); DBG_PRINTLN(" sec");
 	}

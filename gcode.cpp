@@ -122,10 +122,11 @@ void Gcode::gcode_M51() {
 void Gcode::gcode_M52() {
   if(!network.start()) {
     SERIAL_ECHOLN("Connect fail, please check your INI file or set the wifi config and connect again");
-    SERIAL_ECHOLN("- M50: Set the wifi ssid , 'M50 ssid-name'");
-    SERIAL_ECHOLN("- M51: Set the wifi password , 'M51 password'");
-    SERIAL_ECHOLN("- M52: Start to connect the wifi");
-    SERIAL_ECHOLN("- M53: Check the connection status");
+    SERIAL_ECHOLN("- M50: Set WiFi SSID");
+    SERIAL_ECHOLN("- M51: Set WiFi Password");
+    SERIAL_ECHOLN("- M52: Connect");
+    SERIAL_ECHOLN("- M53: Connection Status");
+    SERIAL_ECHOLN("- M54: Set Hostname");
   }
 }
 
@@ -135,10 +136,11 @@ void Gcode::gcode_M52() {
 void Gcode::gcode_M53() {
   if(WiFi.status() != WL_CONNECTED) {
     SERIAL_ECHOLN("Wifi not connected");
-    SERIAL_ECHOLN("- M50: Set the wifi ssid , 'M50 ssid-name'");
-    SERIAL_ECHOLN("- M51: Set the wifi password , 'M51 password'");
-    SERIAL_ECHOLN("- M52: Start to connect the wifi");
-    SERIAL_ECHOLN("- M53: Check the connection status");
+    SERIAL_ECHOLN("- M50: Set WiFi SSID");
+    SERIAL_ECHOLN("- M51: Set WiFi Password");
+    SERIAL_ECHOLN("- M52: Connect");
+    SERIAL_ECHOLN("- M53: Connection Status");
+    SERIAL_ECHOLN("- M54: Set Hostname");
   }
   else {
     SERIAL_ECHOLN("");
@@ -146,8 +148,18 @@ void Gcode::gcode_M53() {
     SERIAL_ECHO("IP address: "); SERIAL_ECHOLN(WiFi.localIP());
     SERIAL_ECHO("RSSI: "); SERIAL_ECHOLN(WiFi.RSSI());
     SERIAL_ECHO("Mode: "); SERIAL_ECHOLN(WiFi.getPhyMode());
-    SERIAL_ECHO("Asscess to SD at the Run prompt : \\\\"); SERIAL_ECHO(WiFi.localIP());SERIAL_ECHOLN("\\DavWWWRoot");
+    SERIAL_ECHO("Access to SD at the Run prompt : \\\\"); SERIAL_ECHO(config.hostname());SERIAL_ECHOLN("\\DavWWWRoot");
   }
+}
+
+/**
+ * M54: Set the hostname
+ */
+void Gcode::gcode_M54() {
+  for (char *fn = parser.string_arg; *fn; ++fn);
+  config.hostname(parser.string_arg);
+  SERIAL_ECHO("hostname: ");
+  SERIAL_ECHOLN(config.hostname());
 }
 
 /**
@@ -169,6 +181,7 @@ void Gcode::process_parsed_command() {
       case 51: gcode_M51(); break;
       case 52: gcode_M52(); break;
       case 53: gcode_M53(); break;
+      case 54: gcode_M54(); break;
       default: parser.unknown_command_error();
     }
     break;
